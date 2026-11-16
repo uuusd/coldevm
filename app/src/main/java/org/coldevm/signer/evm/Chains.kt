@@ -37,7 +37,7 @@ object Chains {
 class Token(val chainId: Long, val address: Address, val symbol: String, val decimals: Int)
 
 /**
- * A short built-in list of USDT and USDC contracts on major chains. A token not listed here is shown as
+ * A short built-in list: USDT and USDC on major chains plus the assets of the recognised protocols. A token not listed here is shown as
  * "unknown token" with its raw amount: a fake token can copy any name, but not these addresses.
  */
 object Tokens {
@@ -55,6 +55,19 @@ object Tokens {
         t(42161, "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", "USDT", 6),
         t(42161, "0xaf88d065e77c8cc2239327c5edb3a432268e5831", "USDC", 6),
         t(8453, "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", "USDC", 6),
+        // Underlying assets of the protocols in Protocols.kt, read on chain 2026-11-16 (ERC-4626 asset(), Benqi
+        // underlying(), then symbol() / decimals()), so approvals and deposits show real amounts.
+        t(1, "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", "WETH", 18),
+        t(1, "0x6b175474e89094c44da98b954eedeac495271d0f", "DAI", 18),
+        t(1, "0xdc035d45d973e3ec169d2276ddab16f1e407384f", "USDS", 18),
+        t(1, "0x6c3ea9036406852006290770bedfcaba0e23a0e8", "PYUSD", 6),
+        t(43114, "0x2b2c81e08f1af8835a78bb2a90ae924ace0ea4be", "sAVAX", 18),
+        t(43114, "0x152b9d0fdc40c096757f570a51e494bd4b943e50", "BTC.b", 8),
+        t(43114, "0x49d5c2bdffac6ce2bfdb6640f4f80f226bc10bab", "WETH.e", 18),
+        t(43114, "0x5947bb275c521040051d82396192181b413227a3", "LINK.e", 18),
+        t(43114, "0xc7198437980c041c805a1edcba50c1ce5db95118", "USDT.e", 6),
+        t(43114, "0xa7d7079b0fead91f3e65f86e8915cb59c1a4c664", "USDC.e", 6),
+        t(43114, "0xd586e7f844cea2f87f50152665bcbc2c279d8d70", "DAI.e", 18),
     )
 
     fun find(chainId: Long, address: Address): Token? = list.firstOrNull { it.chainId == chainId && it.address == address }

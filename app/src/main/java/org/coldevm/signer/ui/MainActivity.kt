@@ -245,7 +245,12 @@ private fun App(activity: FragmentActivity, store: WalletStore, addressBook: Add
                         val decrypt = withContext(Dispatchers.IO) { w.seedStore.decryptCipher() }
                         val cipher = activity.authenticate(decrypt, "签名 · ${w.name}", s.review.account.address.checksummed, w.pinOnly)
                         val sig = withContext(Dispatchers.Default) {
-                            store.withSeed(w, cipher) { seed -> SignLogic.sign(seed, s.review.account, s.review.tx, s.request.signData) }
+                            store.withSeed(w, cipher) { seed ->
+                                // The review used cached public keys (own accounts, look-alike checks): refuse if they
+                                // no longer match the seed. The cache is repaired; the request must be scanned again.
+                                if (!store.verifyCache(w, seed)) throw RejectedException("本机缓存的公钥与种子不一致，已根据种子重建。请重新扫描签名请求，并核对 OKX / Rabby 中的地址。")
+                                SignLogic.sign(seed, s.review.account, s.review.tx, s.request.signData)
+                            }
                         }
                         addressBook.remember(s.review.summary.recipients)
                         screen = Screen.Signed(UR(KeystoneUr.TYPE_ETH_SIGNATURE, KeystoneUr.encodeSignature(s.request.requestId, sig)))

@@ -94,6 +94,20 @@ class WalletStore(private val context: Context) {
         try { return block(seed) } finally { seed.fill(0) }
     }
 
+    /**
+     * The cached public data (fingerprint and extended public keys, which give the receive addresses, the connect
+     * QR and the own-account list) re-derived from the decrypted seed. On a mismatch the cache is rewritten from the
+     * seed and false is returned, so a corrupted cache can never stay in use unnoticed.
+     */
+    fun verifyCache(wallet: Wallet, seed: ByteArray): Boolean {
+        val fp = Bip32.masterFingerprint(seed)
+        val keys = EthKeys.derive(seed).serialize()
+        if (fp.contentEquals(wallet.fingerprint) && keys == wallet.keys.serialize()) return true
+        prefs.edit().putString("${wallet.id}.fp", fp.toHex()).putString("${wallet.id}.keys", keys).commit()
+        cache = null
+        return false
+    }
+
     fun delete(wallet: Wallet) {
         wallet.seedStore.wipe()
         val edit = prefs.edit()

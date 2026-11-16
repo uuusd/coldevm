@@ -180,7 +180,7 @@ fun ConnectScreen(wallet: Wallet, target: ConnectTarget, onBack: () -> Unit) {
     val ur = remember(wallet.id, target) {
         when (target) {
             ConnectTarget.OKX -> UR(KeystoneUr.TYPE_MULTI_ACCOUNTS, KeystoneUr.encodeMultiAccounts(wallet.fingerprint, "coldevm-${wallet.id}", wallet.keys.syncKeys()))
-            ConnectTarget.RABBY -> UR(KeystoneUr.TYPE_HDKEY, wallet.keys.standardHdKey(wallet.fingerprint, wallet.name.take(32)))
+            ConnectTarget.RABBY -> UR(KeystoneUr.TYPE_HDKEY, wallet.keys.standardHdKey(wallet.fingerprint, "Keystone"))
         }
     }
     Page(target.title, onBack) {

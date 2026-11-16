@@ -66,7 +66,7 @@ fun ImportScreen(bip39: Bip39, onBack: () -> Unit, onNext: (List<String>) -> Uni
     val lastDone = lastPartial.isEmpty() || bip39.isWord(lastPartial)
     val error = if (words.size in Bip39.VALID_LENGTHS && lastDone) bip39.validate(words) else null
     Page("导入助记词", onBack) {
-        Text("按顺序输入 12 或 24 个英文单词，用空格分隔。")
+        Text("按顺序输入 12、15、18、21 或 24 个英文单词，用空格分隔。")
         OutlinedTextField(
             value = field,
             onValueChange = { field = it },

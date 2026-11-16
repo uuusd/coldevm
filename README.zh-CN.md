@@ -46,17 +46,18 @@ apksigner verify --print-certs coldevm-<版本>.apk
 
 - 网络名称和链 ID、转出金额和收款地址（地址按 4 个字符一组显示，首尾两组高亮）、最高手续费。
 - 能解析的调用：原生币转账、ERC-20 `transfer`、`approve` / `increaseAllowance`（红色；无限额度会额外警告；`approve(…, 0)` 显示为撤销授权）、`setApprovalForAll`（红色）、`transferFrom` / `safeTransferFrom`。
-- 借贷和储蓄协议：只按“链 + 合约地址”识别（地址已在链上核验，见 `Protocols.kt`）。包括 Aave V3（11 条链）和 SparkLend 的 `supply` / `withdraw` 及原生币存取入口；Spark 储蓄金库（sDAI、sUSDS、sUSDC、spUSDC、spUSDT、spETH、spPYUSD）的 `deposit` / `mint` / `withdraw` / `redeem`；Avalanche 上 Benqi 核心市场的 `mint` / `redeem` / `redeemUnderlying`。审阅页会显示“存入 1000 USDC 到 Aave V3 Pool（Avalanche）”，而不是盲签。`onBehalfOf` / `receiver` / `to` / `owner` 必须是本机的账户，否则标红。给这些合约授权确切数量时显示黄色，无限额度授权仍然标红。这些合约上的其他函数（借款、清算等）仍按未知调用处理。
-- 代币名称只认内置的 USDT/USDC 合约（Ethereum、BNB Chain、Polygon、Avalanche、Arbitrum、Base）。其他代币一律显示为“未知代币”和原始数量——假冒代币可以用任何名字，但用不了这些合约地址。
+- 借贷和储蓄协议：只按“链 + 合约地址”识别（地址已在链上核验，见 `Protocols.kt`）。包括 Aave V3（11 条链）和 SparkLend 的 `supply` / `withdraw` 及原生币存取入口；Spark 储蓄金库（sDAI、sUSDS、sUSDC、spUSDC、spUSDT、spETH、spPYUSD）的 `deposit` / `mint` / `withdraw` / `redeem`；Avalanche 上 Benqi 核心市场的 `mint` / `redeem` / `redeemUnderlying`。审阅页会显示“存入 1000 USDC 到 Aave V3 Pool（Avalanche）”，而不是盲签。`onBehalfOf` / `receiver` / `to` / `owner` 必须是本机的账户，否则标红。给这些合约授权正常数量时显示黄色，无限额度或大得离谱的额度（超过 10^12 个代币）仍然标红。这些合约上的其他函数（借款、清算等）仍按未知调用处理。
+- 代币名称只认内置列表：USDT/USDC（Ethereum、BNB Chain、Polygon、Avalanche、Arbitrum、Base），以及上述协议的底层资产（Ethereum 上的 WETH、DAI、USDS、PYUSD；Avalanche 上的 sAVAX、BTC.b、WETH.e、LINK.e、USDT.e、USDC.e、DAI.e），均已在链上核对。其他代币一律显示为“未知代币”和原始数量——假冒代币可以用任何名字，但用不了这些合约地址。
 - 未知合约调用、部署合约、参数格式不规范：标红（相当于盲签），必须先勾选确认才能签名。
 - 手续费：超过该链常见水平显示黄色，超过 10 倍标红并需要确认；手续费高于转账金额时也会提醒。
-- 收款记录：区分“本机从未签过给这个地址的转账”和“签过 N 笔”。如果收款地址和本机 110 个账户之一或以前的收款地址首尾各 3 位相同但不是同一个地址，会标红提示**疑似地址投毒**。
+- 收款记录：区分“本机从未签过给这个地址的转账”和“签过 N 笔”。如果收款地址和本机 110 个账户之一或以前的收款地址首尾各 3 位相同但不是同一个地址，会标红提示**疑似地址投毒**，必须勾选确认才能签名；收款地址本身就是内置代币合约时同样如此。
 
 ## 安全设计
 
 - 没有网络权限；禁止截屏；App 在前台时隐藏其他 App 的悬浮窗；App 数据不参与备份和设备迁移。
 - 种子只在验证身份后为一次签名解密，用完立即清除。
 - 严格按规范编码解析 RLP 和 ABI：两串不同的字节不会被解析成同一笔交易，签名用的字节就是审阅时解析的那串字节。请求里声明的链 ID 必须和交易内的一致。
+- 每次签名前都用种子重新推导缓存的公钥（本机账户、收款地址），不一致时重建缓存并拒绝这次请求。
 - 签名前重新推导私钥，并和账户缓存的公钥核对；签名后验签、恢复签名地址，确认无误才显示签名二维码。使用确定性随机数（RFC 6979）和 low-s。
 - 不可信的二维码数据先做 CBOR 结构检查再解析（声明长度不能超过实际数据、只接受定长编码、限制嵌套深度、只在 Keystone 协议使用的位置接受标签）。
 - 依赖库的校验和固定在 `gradle/verification-metadata.xml` 中。
@@ -66,7 +67,7 @@ apksigner verify --print-certs coldevm-<版本>.apk
 - 没有第三方审计，只做过自查（见 `AuditRegressionTest`）。
 - 不签消息，所以 DApp 登录、Permit、EIP-712 都用不了。在 Aave / Spark 上授权时请选“用交易授权”（Transaction），不要选签名授权。
 - Java 运行环境无法可靠清除私钥计算过程中的所有中间副本（BigInteger、String）。
-- 暂不支持可复现构建。
+- 构建实际上可复现（用同一工具链重新构建打 tag 的提交，除签名块外 APK 内容完全相同），但还没有独立验证，也没有写成逐步说明。
 
 ## 从源码编译
 

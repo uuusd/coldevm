@@ -126,11 +126,17 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
                 }
             }
             else -> {
+                val (h0, r0, w0) = Triple(headlines.size, recipients.size, warnings.size)
                 val call = runCatching {
                     Protocols.find(tx.chainId, to)?.let { decodeProtocol(tx, it, symbol, warnings, fields, ::deposit) }
                         ?: decodeCall(tx, to, symbol, warnings, fields, ::pay)
                 }.getOrElse { e ->
+                    // Nothing a half-finished decode produced may stay on screen: no "deposit into …" line with a
+                    // green tick next to a call whose arguments turned out to be malformed.
                     fields.clear()
+                    headlines.subList(h0, headlines.size).clear()
+                    recipients.subList(r0, recipients.size).clear()
+                    warnings.subList(w0, warnings.size).clear()
                     warnings += Risk.DANGER to "合约调用参数格式异常（${e.message}），无法解析，相当于盲签"
                     null
                 }
@@ -148,6 +154,10 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
                 }
             }
         }
+
+        // A recipient alert (look-alike address, token contract as recipient) is red like any other danger: it must
+        // colour the summary and require the explicit acknowledgement, not only show as text under the address.
+        headlines.mapNotNull { it.alert }.distinct().forEach { warnings += Risk.DANGER to it }
 
         fields += Field("链", chainLabel(tx.chainId))
         fields += Field("Nonce", tx.nonce.toString())
@@ -202,7 +212,8 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
                 val to = args.address(0); val v = args.uint(1)
                 tokenFields()
                 pay(tokenAmount(v), to)
-                if (to == contract) warnings += Risk.DANGER to "收款地址就是代币合约本身，转过去的代币通常无法取回"
+                // A listed token contract as recipient is already flagged by the headline alert.
+                if (to == contract && token == null) warnings += Risk.DANGER to "收款地址就是代币合约本身，转过去的代币通常无法取回"
                 Triple("转账 $tokenName", null, false)
             }
             SEL_APPROVE, SEL_INCREASE_ALLOWANCE -> {
@@ -212,18 +223,22 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
                 val protocol = Protocols.find(tx.chainId, spender)
                 fields += Field("被授权方", spender.checksummed + (own[spender]?.let { " ($it)" } ?: protocol?.let { " (${Protocols.label(it)})" } ?: ""), highlight = true)
                 val unlimited = v >= UNLIMITED
+                // Finite but absurd: more than 10^12 whole tokens (or ≥ 2^96 raw units of an unknown token).
+                val huge = !unlimited && v > (token?.let { BigInteger.TEN.pow(it.decimals + 12) } ?: HUGE_RAW)
                 val amountText = if (unlimited) "无限额度" else tokenAmount(v)
                 fields += Field(if (sel == SEL_APPROVE) "授权额度" else "增加额度", amountText, highlight = true)
                 if (sel == SEL_APPROVE && v.signum() == 0) {
                     Triple("撤销授权", "撤销 ${spender.short()} 对 $tokenName 的授权", false)
                 } else {
-                    if (protocol != null && !unlimited) {
+                    if (protocol != null && !unlimited && !huge) {
                         // Approving exactly the amount about to be deposited into a recognised protocol is routine.
                         warnings += Risk.WARN to "授权 ${Protocols.label(protocol)} 动用你的 $tokenName（$amountText），通常是存入前的一步。合约地址已离线核对。"
                     } else {
                         warnings += Risk.DANGER to "授权 ${spender.checksummed} 动用你的 $tokenName（$amountText）。对方之后无需你再签名即可转走这些代币，只授权给你确认过的合约。"
                     }
                     if (unlimited) warnings += Risk.DANGER to "无限额度授权：对方可以转走这个代币的全部余额（包括以后收到的）" +
+                        (protocol?.let { "。即使是 ${it.name}，也建议只授权本次存入的数量" } ?: "")
+                    else if (huge) warnings += Risk.DANGER to "授权额度极大（$amountText），实际上等于无限授权" +
                         (protocol?.let { "。即使是 ${it.name}，也建议只授权本次存入的数量" } ?: "")
                     val target = protocol?.name ?: tokenName
                     Triple(if (sel == SEL_APPROVE) "授权 (approve)" else "增加授权 (increaseAllowance)", if (protocol != null) "授权 ${protocol.name} 使用 $tokenName：$amountText" else "授权 $target：$amountText", false)
@@ -413,7 +428,7 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
         val count = history[to] ?: 0
         val alert = when {
             Tokens.find(chainId, to) != null -> "收款地址是代币合约本身，转过去的资产通常无法取回"
-            count == 0 -> lookAlike(to)?.let { "⚠ 疑似地址投毒：与${it.second} ${it.first.checksummed} 首尾相同，但不是同一个地址！" }
+            count == 0 -> lookAlike(to)?.let { "疑似地址投毒：与${it.second} ${it.first.checksummed} 首尾相同，但不是同一个地址！" }
             else -> null
         }
         return Headline(amount, to.checksummed, if (count > 0) RecipientStatus.KNOWN else RecipientStatus.NEW, timesBefore = count, alert = alert)
@@ -470,6 +485,9 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
 
         /** Treat ≥ 2^128 as "unlimited": real approvals of finite amounts never come near it. */
         private val UNLIMITED = BigInteger.ONE.shiftLeft(128)
+
+        /** Approvals of an unknown token at or above this many raw units are treated as effectively unlimited. */
+        private val HUGE_RAW = BigInteger.ONE.shiftLeft(96).subtract(BigInteger.ONE)
 
         fun amount(v: BigInteger, decimals: Int): String =
             BigDecimal(v, decimals).stripTrailingZeros().toPlainString()

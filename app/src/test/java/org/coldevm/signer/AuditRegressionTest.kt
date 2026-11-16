@@ -115,4 +115,68 @@ class AuditRegressionTest {
         val mimic = Address.parse(own.substring(0, 5) + "0".repeat(34) + own.takeLast(3))!!
         assertNotNull(review(eip1559Tx(1, 0, mimic, ETHER)).summary.headlines.single().alert)
     }
+
+    private val usdt = Address.parse("0xdac17f958d2ee523a2206206994597c13d831ec7")!!
+    private val usdc = Address.parse("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")!!
+    private val aavePool = Address.parse("0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2")!!
+
+    /** Audit #2 M1: a recipient alert (address poisoning, token contract as recipient) is red and needs acknowledgement. */
+    @Test fun recipientAlertsGateSigning() {
+        val own = KEYS.standard(0).address.checksummed.lowercase()
+        val mimic = Address.parse(own.substring(0, 5) + "0".repeat(34) + own.takeLast(3))!!
+        for (tx in listOf(
+            eip1559Tx(1, 0, mimic, ETHER),
+            eip1559Tx(1, 0, usdt, BigInteger.ZERO, call("a9059cbb", word(mimic), word(BigInteger.valueOf(1_000_000_000))), gas = 60000),
+            eip1559Tx(1, 0, usdt, BigInteger.ZERO, call("a9059cbb", word(usdc), word(BigInteger.valueOf(1_000_000_000))), gas = 60000),
+            eip1559Tx(1, 0, usdc, ETHER),
+            eip1559Tx(1, 0, usdt, BigInteger.ZERO, call("a9059cbb", word(usdt), word(BigInteger.ONE)), gas = 60000),
+        )) {
+            val s = review(tx).summary
+            assertEquals(Risk.DANGER, s.worstRisk)
+            assertTrue(s.needsAcknowledgement)
+            // One red line per problem, not the same alert twice.
+            assertEquals(s.warnings.size, s.warnings.distinct().size)
+        }
+        // A known recipient is not a look-alike of itself and stays quiet.
+        assertEquals(Risk.INFO, review(eip1559Tx(1, 0, bob, ETHER), history = mapOf(bob to 2)).summary.worstRisk)
+    }
+
+    /** Audit #2 L1: a call whose arguments turn out malformed leaves no half-decoded "deposit" line behind. */
+    @Test fun malformedCallLeavesNoStaleHeadline() {
+        val dirty = ByteArray(32).also { it[0] = 1; KEYS.standard(0).address.bytes.copyInto(it, 12) }
+        val s = review(eip1559Tx(1, 0, aavePool, BigInteger.ZERO, call(org.coldevm.signer.evm.Protocols.AAVE_SUPPLY, word(usdc), word(BigInteger.valueOf(5)), dirty, word(BigInteger.ZERO)), gas = 300000)).summary
+        assertTrue(s.headlines.isEmpty())
+        assertTrue(s.recipients.isEmpty())
+        assertEquals(Risk.DANGER, s.worstRisk)
+        assertEquals("合约调用", s.action)
+    }
+
+    /** Audit #2 L2: an absurd finite approval to a recognised protocol is red, an exact one stays yellow. */
+    @Test fun hugeProtocolApprovalIsRed() {
+        fun approve(v: BigInteger, token: Address = usdc) =
+            review(eip1559Tx(1, 0, token, BigInteger.ZERO, call("095ea7b3", word(aavePool), word(v)), gas = 60000)).summary
+        assertEquals(Risk.DANGER, approve(BigInteger.ONE.shiftLeft(128).subtract(BigInteger.ONE)).worstRisk)
+        assertEquals(Risk.DANGER, approve(BigInteger.TEN.pow(6 + 12).add(BigInteger.ONE)).worstRisk)
+        assertEquals(Risk.WARN, approve(BigInteger.valueOf(5_000_000_000)).worstRisk)
+        // Unknown token: 2^96 raw units and above is effectively unlimited.
+        val unknown = Address.parse("0x1234567890123456789012345678901234567890")!!
+        assertEquals(Risk.DANGER, approve(BigInteger.ONE.shiftLeft(96), unknown).worstRisk)
+    }
+
+    /** Audit #2 L3: protocol assets have names and decimals offline. */
+    @Test fun protocolAssetsKnown() {
+        val dai = Address.parse("0x6b175474e89094c44da98b954eedeac495271d0f")!!
+        val s = review(eip1559Tx(1, 0, dai, BigInteger.ZERO, call("a9059cbb", word(bob), word(ETHER.multiply(BigInteger.valueOf(25)))), gas = 60000)).summary
+        assertEquals("转账 DAI", s.action)
+        assertEquals("25 DAI", s.headlines.single().amount)
+        assertEquals(Risk.INFO, s.worstRisk)
+    }
+
+    /** Audit #2: the sign-time cache check compares serialized keys; a stored cache must round-trip to the derived one. */
+    @Test fun cachedKeysRoundTrip() {
+        val stored = org.coldevm.signer.vault.EthKeys.deserialize(KEYS.serialize())
+        assertEquals(org.coldevm.signer.vault.EthKeys.derive(SEED).serialize(), stored.serialize())
+        val other = org.coldevm.signer.vault.EthKeys.derive(org.coldevm.signer.crypto.Bip39.toSeed(ABANDON, "x"))
+        assertTrue(other.serialize() != stored.serialize())
+    }
 }

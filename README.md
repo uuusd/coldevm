@@ -56,16 +56,17 @@ After connecting, compare account 1's address in both apps.
 
 - Network name and chain id, amount and recipient (addresses in groups of four, first and last group highlighted), maximum fee.
 - Decoded calls: native transfers, ERC-20 `transfer`, `approve` / `increaseAllowance` (red; unlimited amounts get an extra warning; `approve(…, 0)` is shown as a revocation), `setApprovalForAll` (red), `transferFrom` / `safeTransferFrom`.
-- Lending and savings protocols, recognised only by chain **and** address (verified on chain, see `Protocols.kt`): Aave V3 (11 chains) and SparkLend `supply` / `withdraw` and the native-coin gateways, Spark savings vaults (sDAI, sUSDS, sUSDC, spUSDC, spUSDT, spETH, spPYUSD) `deposit` / `mint` / `withdraw` / `redeem`, and Benqi core markets on Avalanche `mint` / `redeem` / `redeemUnderlying`. These show as "deposit 1000 USDC into Aave V3 Pool (Avalanche)" instead of a blind call; every `onBehalfOf` / `receiver` / `to` / `owner` must be one of your own accounts or the review turns red. Approving an exact amount to one of these contracts is yellow; unlimited approvals stay red. Other functions on these contracts (borrow, liquidation, …) remain unknown calls.
-- Token names come only from a built-in list of USDT/USDC contracts on Ethereum, BNB Chain, Polygon, Avalanche, Arbitrum and Base. Any other token is "unknown token" with its raw amount — a fake token can use any name, not these addresses.
+- Lending and savings protocols, recognised only by chain **and** address (verified on chain, see `Protocols.kt`): Aave V3 (11 chains) and SparkLend `supply` / `withdraw` and the native-coin gateways, Spark savings vaults (sDAI, sUSDS, sUSDC, spUSDC, spUSDT, spETH, spPYUSD) `deposit` / `mint` / `withdraw` / `redeem`, and Benqi core markets on Avalanche `mint` / `redeem` / `redeemUnderlying`. These show as "deposit 1000 USDC into Aave V3 Pool (Avalanche)" instead of a blind call; every `onBehalfOf` / `receiver` / `to` / `owner` must be one of your own accounts or the review turns red. Approving a normal amount to one of these contracts is yellow; unlimited approvals and absurd finite ones (more than 10^12 tokens) stay red. Other functions on these contracts (borrow, liquidation, …) remain unknown calls.
+- Token names come only from a built-in list: USDT/USDC on Ethereum, BNB Chain, Polygon, Avalanche, Arbitrum and Base, plus the underlying assets of the protocols above (WETH, DAI, USDS, PYUSD on Ethereum; sAVAX, BTC.b, WETH.e, LINK.e, USDT.e, USDC.e, DAI.e on Avalanche), each read on chain. Any other token is "unknown token" with its raw amount — a fake token can use any name, not these addresses.
 - Unknown contract calls, contract creation and malformed arguments are red ("blind signing") and need an explicit acknowledgement before signing.
 - Fees: yellow above a per-chain normal level, red (acknowledgement required) above 10×, and a warning when the fee exceeds the amount sent.
-- Recipient history: "never signed a transfer to this address" vs "signed N transfers before"; an address whose first and last 3 hex digits match one of your 110 own accounts or a previous recipient but which is different is flagged red as likely **address poisoning**.
+- Recipient history: "never signed a transfer to this address" vs "signed N transfers before"; an address whose first and last 3 hex digits match one of your 110 own accounts or a previous recipient but which is different is flagged red as likely **address poisoning** and needs the explicit acknowledgement before signing; so does a recipient that is itself a listed token contract.
 
 ## Security design
 
 - No network permission; FLAG_SECURE (no screenshots), overlay windows hidden while the app is in front, no backup / device transfer of app data.
 - The seed is decrypted only for one signature, after authentication, and wiped afterwards.
+- Before every signature the cached public keys (own accounts, receive addresses) are re-derived from the seed; on a mismatch the cache is rebuilt and the request refused.
 - Strict, canonical RLP and ABI decoding: two different byte strings never decode to the same transaction, and the bytes that are hashed are exactly the bytes that were reviewed. The chain id declared in the request must match the one inside the transaction.
 - Before signing, the private key is derived again and checked against the account's cached public key; after signing, the signature is verified and the signer address recovered before it is shown. Deterministic nonces (RFC 6979), low-s.
 - Untrusted QR payloads pass a structural CBOR check before parsing (declared lengths must fit the data, definite lengths only, depth limit, tags only where the Keystone protocol uses them).
@@ -76,7 +77,7 @@ After connecting, compare account 1's address in both apps.
 - No third-party audit; self-reviewed only (see `AuditRegressionTest`).
 - No message signing, so DApp logins, Permit and EIP-712 do not work. On Aave / Spark choose "approve with transaction" instead of a signed permit.
 - The JVM cannot reliably wipe every intermediate copy of key material (BigInteger, String).
-- Builds are not reproducible yet.
+- Builds are reproducible in practice (a rebuild of the tagged commit with the same toolchain gives identical APK contents apart from the signature block), but this is not yet independently verified or documented step by step.
 
 ## Building from source
 
