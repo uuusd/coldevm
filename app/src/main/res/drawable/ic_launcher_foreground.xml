@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Snowflake-ish cold mark: three bars -->
+    <path android:fillColor="#FF3DDC97" android:pathData="M36,40h40l-6,6h-40z" />
+    <path android:fillColor="#FF8FA8FF" android:pathData="M32,51h40l6,6h-40z" />
+    <path android:fillColor="#FF3DDC97" android:pathData="M36,62h40l-6,6h-40z" />
+</vector>
