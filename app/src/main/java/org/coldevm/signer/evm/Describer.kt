@@ -15,6 +15,8 @@ enum class RecipientStatus {
     KNOWN,
     /** First transfer to this address. */
     NEW,
+    /** A lending / savings contract recognised by chain and address (see [Protocols]). */
+    PROTOCOL,
 }
 
 /** One "what leaves the wallet" line at the top of the review screen. */
@@ -98,6 +100,11 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
             if (to !in own) recipients += to
         }
 
+        /** Funds going into a recognised protocol contract: shown with its name, not added to the recipient history. */
+        fun deposit(amount: String, p: ProtocolContract) {
+            headlines += Headline(amount, p.address.checksummed, RecipientStatus.PROTOCOL, ownLabel = Protocols.label(p))
+        }
+
         val to = tx.to
         val data = tx.data
         when {
@@ -119,7 +126,10 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
                 }
             }
             else -> {
-                val call = runCatching { decodeCall(tx, to, symbol, warnings, fields, ::pay) }.getOrElse { e ->
+                val call = runCatching {
+                    Protocols.find(tx.chainId, to)?.let { decodeProtocol(tx, it, symbol, warnings, fields, ::deposit) }
+                        ?: decodeCall(tx, to, symbol, warnings, fields, ::pay)
+                }.getOrElse { e ->
                     fields.clear()
                     warnings += Risk.DANGER to "合约调用参数格式异常（${e.message}），无法解析，相当于盲签"
                     null
@@ -199,16 +209,24 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
                 args.expect(2)
                 val spender = args.address(0); val v = args.uint(1)
                 tokenFields()
-                fields += Field("被授权方", spender.checksummed + (own[spender]?.let { " ($it)" } ?: ""), highlight = true)
+                val protocol = Protocols.find(tx.chainId, spender)
+                fields += Field("被授权方", spender.checksummed + (own[spender]?.let { " ($it)" } ?: protocol?.let { " (${Protocols.label(it)})" } ?: ""), highlight = true)
                 val unlimited = v >= UNLIMITED
                 val amountText = if (unlimited) "无限额度" else tokenAmount(v)
                 fields += Field(if (sel == SEL_APPROVE) "授权额度" else "增加额度", amountText, highlight = true)
                 if (sel == SEL_APPROVE && v.signum() == 0) {
                     Triple("撤销授权", "撤销 ${spender.short()} 对 $tokenName 的授权", false)
                 } else {
-                    warnings += Risk.DANGER to "授权 ${spender.checksummed} 动用你的 $tokenName（$amountText）。对方之后无需你再签名即可转走这些代币，只授权给你确认过的合约。"
-                    if (unlimited) warnings += Risk.DANGER to "无限额度授权：对方可以转走这个代币的全部余额（包括以后收到的）"
-                    Triple(if (sel == SEL_APPROVE) "授权 (approve)" else "增加授权 (increaseAllowance)", "授权 $tokenName：$amountText", false)
+                    if (protocol != null && !unlimited) {
+                        // Approving exactly the amount about to be deposited into a recognised protocol is routine.
+                        warnings += Risk.WARN to "授权 ${Protocols.label(protocol)} 动用你的 $tokenName（$amountText），通常是存入前的一步。合约地址已离线核对。"
+                    } else {
+                        warnings += Risk.DANGER to "授权 ${spender.checksummed} 动用你的 $tokenName（$amountText）。对方之后无需你再签名即可转走这些代币，只授权给你确认过的合约。"
+                    }
+                    if (unlimited) warnings += Risk.DANGER to "无限额度授权：对方可以转走这个代币的全部余额（包括以后收到的）" +
+                        (protocol?.let { "。即使是 ${it.name}，也建议只授权本次存入的数量" } ?: "")
+                    val target = protocol?.name ?: tokenName
+                    Triple(if (sel == SEL_APPROVE) "授权 (approve)" else "增加授权 (increaseAllowance)", if (protocol != null) "授权 ${protocol.name} 使用 $tokenName：$amountText" else "授权 $target：$amountText", false)
                 }
             }
             SEL_SET_APPROVAL_FOR_ALL -> {
@@ -247,6 +265,145 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
         if (nativeWithCall && !result.third) {
             warnings += Risk.DANGER to "这笔调用同时向合约转入 ${amount(tx.value, 18)} $symbol，普通代币操作不需要"
             pay("${amount(tx.value, 18)} $symbol", contract)
+        }
+        return result
+    }
+
+    /**
+     * Calls into a recognised lending / savings contract. Returns null for functions it does not decode (borrow,
+     * liquidation, share transfers, …), which then go through [decodeCall] like any other contract call.
+     * Every parameter that decides who receives funds or shares must be one of this device's accounts.
+     */
+    private fun decodeProtocol(
+        tx: EvmTx, p: ProtocolContract, symbol: String,
+        warnings: MutableList<Pair<Risk, String>>, fields: MutableList<Field>,
+        deposit: (String, ProtocolContract) -> Unit,
+    ): Triple<String, String?, Boolean>? {
+        val data = tx.data
+        require(data.size >= 4) { "调用数据不足 4 字节" }
+        val sel = data.copyOfRange(0, 4).toHex()
+        val args = Args(data)
+        val label = Protocols.label(p)
+        var payable = false
+        fun mustBeOwn(a: Address, role: String) {
+            val mine = own[a]
+            fields += Field(role, a.checksummed + (mine?.let { " ($it)" } ?: ""), highlight = mine == null)
+            if (mine == null) warnings += Risk.DANGER to "$role 不是本机的账户：${a.checksummed}。资金或份额会记到别人名下！"
+        }
+        fun assetAmount(asset: Address, v: BigInteger): String {
+            if (v == MAX_UINT) return "全部"
+            val t = Tokens.find(tx.chainId, asset)
+            if (t == null) {
+                fields += Field("资产合约", asset.checksummed, highlight = true)
+                warnings += Risk.WARN to "资产 ${asset.checksummed} 不在内置代币表中，数量按原始整数显示"
+                return "$v（原始数量）"
+            }
+            return "${amount(v, t.decimals)} ${t.symbol}"
+        }
+        fun units(v: BigInteger, decimals: Int, sym: String?) = if (v == MAX_UINT) "全部" else "${amount(v, decimals)} ${sym ?: ""}".trim()
+        fun poolMatches(pool: Address) {
+            val target = Protocols.find(tx.chainId, pool)
+            fields += Field("借贷池", pool.checksummed + (target?.let { " (${it.name})" } ?: ""), highlight = target == null)
+            if (target?.kind != ProtocolKind.AAVE_POOL) warnings += Risk.DANGER to "原生币存取入口指向了未识别的借贷池 ${pool.checksummed}"
+        }
+        fields += Field("协议合约", "${p.address.checksummed} ($label)")
+
+        val result: Triple<String, String?, Boolean> = when (p.kind) {
+            ProtocolKind.AAVE_POOL -> when (sel) {
+                Protocols.AAVE_SUPPLY, Protocols.AAVE_DEPOSIT -> {
+                    args.expect(4)
+                    deposit(assetAmount(args.address(0), args.uint(1)), p)
+                    mustBeOwn(args.address(2), "存款记入的账户 (onBehalfOf)")
+                    Triple("存入 ${p.name}", null, false)
+                }
+                Protocols.AAVE_WITHDRAW -> {
+                    args.expect(3)
+                    val amt = assetAmount(args.address(0), args.uint(1))
+                    mustBeOwn(args.address(2), "取款收款地址 (to)")
+                    Triple("从 ${p.name} 取出", "从 $label 取出 $amt", false)
+                }
+                else -> return null
+            }
+            ProtocolKind.AAVE_GATEWAY -> when (sel) {
+                Protocols.GATEWAY_DEPOSIT -> {
+                    args.expect(3)
+                    poolMatches(args.address(0))
+                    mustBeOwn(args.address(1), "存款记入的账户 (onBehalfOf)")
+                    payable = true
+                    if (tx.value.signum() == 0) warnings += Risk.WARN to "存入金额为 0"
+                    deposit("${amount(tx.value, 18)} $symbol", p)
+                    Triple("存入 $symbol（${p.name.removeSuffix(" 原生币存取入口")}）", null, false)
+                }
+                Protocols.GATEWAY_WITHDRAW -> {
+                    args.expect(3)
+                    poolMatches(args.address(0))
+                    val v = args.uint(1)
+                    mustBeOwn(args.address(2), "取款收款地址 (to)")
+                    Triple("取出 $symbol", "从 $label 取出 ${units(v, 18, symbol)}", false)
+                }
+                else -> return null
+            }
+            ProtocolKind.VAULT -> when (sel) {
+                Protocols.VAULT_DEPOSIT, Protocols.VAULT_DEPOSIT_REF, Protocols.VAULT_DEPOSIT_MIN_REF -> {
+                    args.expect(when (sel) { Protocols.VAULT_DEPOSIT -> 2; Protocols.VAULT_DEPOSIT_REF -> 3; else -> 4 })
+                    deposit(units(args.uint(0), p.assetDecimals, p.assetSymbol), p)
+                    mustBeOwn(args.address(1), "份额接收账户 (receiver)")
+                    if (sel == Protocols.VAULT_DEPOSIT_MIN_REF) fields += Field("最少获得份额", units(args.uint(2), p.shareDecimals, p.shareSymbol))
+                    Triple("存入 ${p.name}", null, false)
+                }
+                Protocols.VAULT_MINT, Protocols.VAULT_MINT_REF, Protocols.VAULT_MINT_MAX_REF -> {
+                    args.expect(when (sel) { Protocols.VAULT_MINT -> 2; Protocols.VAULT_MINT_REF -> 3; else -> 4 })
+                    val shares = units(args.uint(0), p.shareDecimals, p.shareSymbol)
+                    val max = if (sel == Protocols.VAULT_MINT_MAX_REF) "（最多 ${units(args.uint(2), p.assetDecimals, p.assetSymbol)}）" else ""
+                    deposit("换取 $shares 所需的 ${p.assetSymbol}$max", p)
+                    mustBeOwn(args.address(1), "份额接收账户 (receiver)")
+                    Triple("存入 ${p.name}", null, false)
+                }
+                Protocols.VAULT_WITHDRAW, Protocols.VAULT_WITHDRAW_MAX -> {
+                    args.expect(if (sel == Protocols.VAULT_WITHDRAW) 3 else 4)
+                    val amt = units(args.uint(0), p.assetDecimals, p.assetSymbol)
+                    mustBeOwn(args.address(1), "取款收款地址 (receiver)")
+                    mustBeOwn(args.address(2), "份额所有者 (owner)")
+                    Triple("从 ${p.name} 取出", "从 $label 取出 $amt", false)
+                }
+                Protocols.VAULT_REDEEM, Protocols.VAULT_REDEEM_MIN -> {
+                    args.expect(if (sel == Protocols.VAULT_REDEEM) 3 else 4)
+                    val shares = units(args.uint(0), p.shareDecimals, p.shareSymbol)
+                    mustBeOwn(args.address(1), "取款收款地址 (receiver)")
+                    mustBeOwn(args.address(2), "份额所有者 (owner)")
+                    if (sel == Protocols.VAULT_REDEEM_MIN) fields += Field("最少取回", units(args.uint(3), p.assetDecimals, p.assetSymbol))
+                    Triple("从 ${p.name} 赎回", "从 $label 赎回 $shares（换回 ${p.assetSymbol}）", false)
+                }
+                else -> return null
+            }
+            ProtocolKind.BENQI_MARKET -> when (sel) {
+                Protocols.BENQI_MINT_NATIVE -> {
+                    args.expect(0)
+                    if (!p.native) throw IllegalArgumentException("mint() 只用于 qiAVAX 市场")
+                    payable = true
+                    deposit("${amount(tx.value, 18)} $symbol", p)
+                    Triple("存入 ${p.name}", null, false)
+                }
+                Protocols.BENQI_MINT -> {
+                    args.expect(1)
+                    if (p.native) throw IllegalArgumentException("qiAVAX 市场应使用 mint()")
+                    deposit(units(args.uint(0), p.assetDecimals, p.assetSymbol), p)
+                    Triple("存入 ${p.name}", null, false)
+                }
+                Protocols.BENQI_REDEEM -> {
+                    args.expect(1)
+                    Triple("从 ${p.name} 赎回", "从 $label 赎回 ${units(args.uint(0), p.shareDecimals, p.shareSymbol)}（换回 ${p.assetSymbol}，转到本账户）", false)
+                }
+                Protocols.BENQI_REDEEM_UNDERLYING -> {
+                    args.expect(1)
+                    Triple("从 ${p.name} 取出", "从 $label 取出 ${units(args.uint(0), p.assetDecimals, p.assetSymbol)}（转到本账户）", false)
+                }
+                else -> return null
+            }
+        }
+        if (tx.value.signum() > 0 && !payable) {
+            warnings += Risk.DANGER to "这笔调用同时向合约转入 ${amount(tx.value, 18)} $symbol，这个操作不需要原生币"
+            deposit("${amount(tx.value, 18)} $symbol", p)
         }
         return result
     }
@@ -308,6 +465,8 @@ class Describer(private val own: Map<Address, String>, private val history: Map<
         private const val EDGE = 3
 
         private val GWEI = BigInteger.TEN.pow(9)
+
+        private val MAX_UINT = BigInteger.ONE.shiftLeft(256).subtract(BigInteger.ONE)
 
         /** Treat ≥ 2^128 as "unlimited": real approvals of finite amounts never come near it. */
         private val UNLIMITED = BigInteger.ONE.shiftLeft(128)

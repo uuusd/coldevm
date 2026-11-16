@@ -45,7 +45,17 @@ class FileKeyring extends BaseKeyring {
   assert(a2.toLowerCase() === '0x6fac4d18c912343bf86fa7049364dd4e424ab9c0', 'Rabby keyring account 2 = ' + a2);
   console.log('     keyring xfp', kr.xfp, 'name', kr.name, 'keyringMode', kr.keyringMode);
   const BOB = '0x3535353535353535353535353535353535353535';
+  const aave = new ethers.Interface(['function supply(address,uint256,address,uint16)', 'function withdraw(address,uint256,address)']);
+  const qi = new ethers.Interface(['function mint()', 'function mint(uint256)', 'function redeemUnderlying(uint256)']);
+  const vault = new ethers.Interface(['function deposit(uint256,address,uint16)']);
+  const avax = Common.custom({ chainId: 43114 });
+  const fee = { type: 2n, maxPriorityFeePerGas: 10n ** 9n, maxFeePerGas: 30n * 10n ** 9n, gasLimit: 300000n };
+  const USDC = '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E';
   const cases = [
+    { from: a1, tx: { ...fee, nonce: 10n, to: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', value: 0n, data: aave.encodeFunctionData('supply', [USDC, 1000n * 10n ** 6n, a1, 0]) }, common: avax, expect: 'INFO' },
+    { from: a1, tx: { ...fee, nonce: 11n, to: '0x794a61358D6845594F94dc1DB02A252b5b4814aD', value: 0n, data: aave.encodeFunctionData('withdraw', [USDC, ethers.MaxUint256, BOB]) }, common: avax, expect: 'DANGER' },
+    { from: a1, tx: { ...fee, nonce: 12n, to: '0x5C0401e81Bc07Ca70fAD469b451682c0d747Ef1c', value: 3n * 10n ** 18n, data: qi.encodeFunctionData('mint()', []) }, common: avax, expect: 'INFO' },
+    { from: a1, tx: { ...fee, nonce: 13n, to: '0x28B3a8fb53B741A8Fd78c0fb9A6B2393d896a43d', value: 0n, data: vault.encodeFunctionData('deposit', [500n * 10n ** 6n, a1, 0]) }, common: avax, expect: 'INFO' },
     { from: a1, tx: { type: 2, chainId: 8453n, nonce: 1n, maxPriorityFeePerGas: 10n ** 6n, maxFeePerGas: 10n ** 8n, gasLimit: 21000n, to: BOB, value: 10n ** 16n }, common: Common.custom({ chainId: 8453 }) },
     { from: a2, tx: { type: 0, nonce: 2n, gasPrice: 3n * 10n ** 9n, gasLimit: 21000n, to: BOB, value: 10n ** 17n }, common: Common.custom({ chainId: 56 }) },
   ];
@@ -55,5 +65,9 @@ class FileKeyring extends BaseKeyring {
     const raw = '0x' + Buffer.from(signed.serialize()).toString('hex');
     const back = ethers.Transaction.from(raw);
     assert(back.from.toLowerCase() === c.from.toLowerCase() && signed.verifySignature(), `type ${c.tx.type} chain ${back.chainId}: signed by ${back.from}`);
+    if (c.expect) {
+      const rev = fs.readFileSync(path.join(xdir, 'review-rabby-' + n + '.txt'), 'utf8');
+      assert(rev.includes('risk ' + c.expect), `ColdEVM risk for ${back.data.slice(0, 10)} on ${back.to} is ${c.expect}`);
+    }
   }
 })().catch(e => { console.error(e); process.exit(1); });

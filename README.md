@@ -56,6 +56,7 @@ After connecting, compare account 1's address in both apps.
 
 - Network name and chain id, amount and recipient (addresses in groups of four, first and last group highlighted), maximum fee.
 - Decoded calls: native transfers, ERC-20 `transfer`, `approve` / `increaseAllowance` (red; unlimited amounts get an extra warning; `approve(…, 0)` is shown as a revocation), `setApprovalForAll` (red), `transferFrom` / `safeTransferFrom`.
+- Lending and savings protocols, recognised only by chain **and** address (verified on chain, see `Protocols.kt`): Aave V3 (11 chains) and SparkLend `supply` / `withdraw` and the native-coin gateways, Spark savings vaults (sDAI, sUSDS, sUSDC, spUSDC, spUSDT, spETH, spPYUSD) `deposit` / `mint` / `withdraw` / `redeem`, and Benqi core markets on Avalanche `mint` / `redeem` / `redeemUnderlying`. These show as "deposit 1000 USDC into Aave V3 Pool (Avalanche)" instead of a blind call; every `onBehalfOf` / `receiver` / `to` / `owner` must be one of your own accounts or the review turns red. Approving an exact amount to one of these contracts is yellow; unlimited approvals stay red. Other functions on these contracts (borrow, liquidation, …) remain unknown calls.
 - Token names come only from a built-in list of USDT/USDC contracts on Ethereum, BNB Chain, Polygon, Avalanche, Arbitrum and Base. Any other token is "unknown token" with its raw amount — a fake token can use any name, not these addresses.
 - Unknown contract calls, contract creation and malformed arguments are red ("blind signing") and need an explicit acknowledgement before signing.
 - Fees: yellow above a per-chain normal level, red (acknowledgement required) above 10×, and a warning when the fee exceeds the amount sent.
@@ -73,7 +74,7 @@ After connecting, compare account 1's address in both apps.
 ## Known limitations
 
 - No third-party audit; self-reviewed only (see `AuditRegressionTest`).
-- No message signing, so DApp logins, Permit and EIP-712 do not work.
+- No message signing, so DApp logins, Permit and EIP-712 do not work. On Aave / Spark choose "approve with transaction" instead of a signed permit.
 - The JVM cannot reliably wipe every intermediate copy of key material (BigInteger, String).
 - Builds are not reproducible yet.
 

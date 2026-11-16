@@ -46,6 +46,7 @@ apksigner verify --print-certs coldevm-<版本>.apk
 
 - 网络名称和链 ID、转出金额和收款地址（地址按 4 个字符一组显示，首尾两组高亮）、最高手续费。
 - 能解析的调用：原生币转账、ERC-20 `transfer`、`approve` / `increaseAllowance`（红色；无限额度会额外警告；`approve(…, 0)` 显示为撤销授权）、`setApprovalForAll`（红色）、`transferFrom` / `safeTransferFrom`。
+- 借贷和储蓄协议：只按“链 + 合约地址”识别（地址已在链上核验，见 `Protocols.kt`）。包括 Aave V3（11 条链）和 SparkLend 的 `supply` / `withdraw` 及原生币存取入口；Spark 储蓄金库（sDAI、sUSDS、sUSDC、spUSDC、spUSDT、spETH、spPYUSD）的 `deposit` / `mint` / `withdraw` / `redeem`；Avalanche 上 Benqi 核心市场的 `mint` / `redeem` / `redeemUnderlying`。审阅页会显示“存入 1000 USDC 到 Aave V3 Pool（Avalanche）”，而不是盲签。`onBehalfOf` / `receiver` / `to` / `owner` 必须是本机的账户，否则标红。给这些合约授权确切数量时显示黄色，无限额度授权仍然标红。这些合约上的其他函数（借款、清算等）仍按未知调用处理。
 - 代币名称只认内置的 USDT/USDC 合约（Ethereum、BNB Chain、Polygon、Avalanche、Arbitrum、Base）。其他代币一律显示为“未知代币”和原始数量——假冒代币可以用任何名字，但用不了这些合约地址。
 - 未知合约调用、部署合约、参数格式不规范：标红（相当于盲签），必须先勾选确认才能签名。
 - 手续费：超过该链常见水平显示黄色，超过 10 倍标红并需要确认；手续费高于转账金额时也会提醒。
@@ -63,7 +64,7 @@ apksigner verify --print-certs coldevm-<版本>.apk
 ## 已知限制
 
 - 没有第三方审计，只做过自查（见 `AuditRegressionTest`）。
-- 不签消息，所以 DApp 登录、Permit、EIP-712 都用不了。
+- 不签消息，所以 DApp 登录、Permit、EIP-712 都用不了。在 Aave / Spark 上授权时请选“用交易授权”（Transaction），不要选签名授权。
 - Java 运行环境无法可靠清除私钥计算过程中的所有中间副本（BigInteger、String）。
 - 暂不支持可复现构建。
 

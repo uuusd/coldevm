@@ -121,11 +121,12 @@ private fun SummaryCard(s: TxSummary) {
 @Composable
 private fun Payment(h: Headline) {
     Text("转出 ${h.amount}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-    Label("收款地址")
+    Label(if (h.status == RecipientStatus.PROTOCOL) "存入合约" else "收款地址")
     Mono(h.to, highlight = h.alert == null, fontSize = AddressSize)
     when {
         h.alert != null -> Text(h.alert, color = DangerColor, fontWeight = FontWeight.Bold, fontSize = 13.sp)
         h.status == RecipientStatus.SELF -> Status("✓ 本机自己的账户（${h.ownLabel}）", Green)
+        h.status == RecipientStatus.PROTOCOL -> Status("✓ 存入已识别的协议合约：${h.ownLabel}（地址已离线核对）", Green)
         h.status == RecipientStatus.KNOWN -> Status("✓ 本机以前签过 ${h.timesBefore} 笔给这个地址的转账。仍请核对完整地址", Green)
         else -> Status("本机从未签过给这个地址的转账：请逐字核对完整地址，不要只看开头和结尾", WarnColor)
     }
