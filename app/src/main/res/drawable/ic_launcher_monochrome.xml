@@ -1,0 +1,6 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Themed-icon layer (Android 13+): the gem's outline in one colour; the system tints it. -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M42,32L66,32L78,46L30,46Z M30,51L78,51L54,80Z" />
+</vector>

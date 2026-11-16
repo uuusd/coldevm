@@ -1,8 +1,13 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- Snowflake-ish cold mark: three bars -->
-    <path android:fillColor="#FF3DDC97" android:pathData="M36,40h40l-6,6h-40z" />
-    <path android:fillColor="#FF8FA8FF" android:pathData="M32,51h40l6,6h-40z" />
-    <path android:fillColor="#FF3DDC97" android:pathData="M36,62h40l-6,6h-40z" />
+    <!-- A cut gem split by a horizontal gap: EVM assets, kept air-gapped. -->
+    <path android:fillColor="#FFD3DEFF" android:pathData="M42,32L30,46L46,46Z" />
+    <path android:fillColor="#FF8FA8FF" android:pathData="M42,32L46,46L54,32Z" />
+    <path android:fillColor="#FFD3DEFF" android:pathData="M54,32L46,46L62,46Z" />
+    <path android:fillColor="#FF8FA8FF" android:pathData="M54,32L62,46L66,32Z" />
+    <path android:fillColor="#FF5B6FD1" android:pathData="M66,32L62,46L78,46Z" />
+    <path android:fillColor="#FF8FA8FF" android:pathData="M30,51L46,51L54,80Z" />
+    <path android:fillColor="#FF5B6FD1" android:pathData="M46,51L62,51L54,80Z" />
+    <path android:fillColor="#FF3E4FA8" android:pathData="M62,51L78,51L54,80Z" />
 </vector>
